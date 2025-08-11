@@ -5,6 +5,14 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from bs4 import BeautifulSoup
+import webbrowser
+import os 
+import sys
+
+def get_resource_path(filename):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, filename)
+    return filename
 
 # Define the main application class
 class ModMergerApp:
@@ -12,6 +20,12 @@ class ModMergerApp:
         self.root = root
         self.root.title("ASOT Mod Merger")
         self.root.geometry("600x600")
+        self.root.resizable(True, True)
+
+        try:
+            self.root.iconbitmap(get_resource_path("logo.ico"))
+        except Exception as e:
+            print(f"Icon load failed: {e}")
 
         self.optional_mods = []
         self.check_vars = []
@@ -20,7 +34,19 @@ class ModMergerApp:
         self.init_ui()
 
     def init_ui(self):
-        # Display usage instructions
+        # Frame for icon and title
+        title_frame = tk.Frame(self.root)
+        title_frame.pack(pady=10)
+
+        # Title label
+        tk.Label(
+            title_frame,
+            text="ASOT Mod Merger",
+            font=("Arial", 16, "bold"),
+            justify="left"
+        ).pack(side="left")
+
+        # Usage instructions
         tk.Label(
             self.root,
             text="Step 1: Load optional mods HTML\nStep 2: Select mods\nStep 3: Load mission preset\nStep 4: Merge and export",
@@ -32,29 +58,54 @@ class ModMergerApp:
         tk.Button(self.root, text="Load Mission File", command=self.load_mission).pack(pady=5)
         tk.Button(self.root, text="Generate Merged File", command=self.merge_and_export).pack(pady=10)
 
+        # Add website link below the last button
+        link_label = tk.Label(
+            self.root,
+            text="https://www.asotmilsim.com/",
+            fg="blue",
+            cursor="hand2"
+        )
+        link_label.pack(pady=(0, 10))
+        link_label.bind("<Button-1>", lambda e: self.open_website())
+
+    def open_website(self):
+        webbrowser.open("https://www.asotmilsim.com/")
+
     def load_optional_mods_html(self):
         # Prompt user to select optional mods HTML file
         path = filedialog.askopenfilename(filetypes=[("HTML Files", "*.html")])
         if not path:
             return
         try:
+            # Clear previous mods before loading new ones
+            self.optional_mods.clear()
+            self.check_vars.clear()
             # Parse HTML and extract mod rows
             with open(path, "r", encoding="utf-8") as f:
                 soup = BeautifulSoup(f.read(), "html.parser")
-            rows = soup.find("div", class_="mod-list").find("table").find_all("tr", {"data-type": "ModContainer"})
-            for row in rows:
-                name = row.find("td", {"data-type": "DisplayName"}).text.strip()
-                source = row.find("span").text.strip()
-                link = row.find("a")["href"].strip()
-                self.optional_mods.append({"name": name, "source": source, "link": link})
+            mod_list_div = soup.find("div", class_="mod-list")
+            if not mod_list_div:
+                messagebox.showerror("Error", "Could not find 'mod-list' div in the HTML file.")
+                return
+            mod_table = mod_list_div.find("table")
+            if not mod_table:
+                messagebox.showerror("Error", "Could not find 'table' inside 'mod-list' div in the HTML file.")
+                return
+            for row in mod_table.find_all("tr"):
+                name_td = row.find("td", {"data-type": "DisplayName"})
+                span_tag = row.find("span")
+                link_tag = row.find("a")
+                if name_td and span_tag and link_tag:
+                    name = name_td.text.strip()
+                    source = span_tag.text.strip()
+                    link = link_tag["href"].strip()
+                    self.optional_mods.append({"name": name, "source": source, "link": link})
         except Exception as e:
             messagebox.showerror("Error", f"Failed to read optional mods:\n{e}")
-            return
 
         # Create scrollable list of mod checkboxes
         frame = tk.Frame(self.root)
         frame.pack(fill="both", expand=True)
-
         canvas = tk.Canvas(frame)
         scrollbar = tk.Scrollbar(frame, orient="vertical", command=canvas.yview)
         scrollable = tk.Frame(canvas)
@@ -65,6 +116,10 @@ class ModMergerApp:
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         for mod in self.optional_mods:
             var = tk.BooleanVar()
@@ -89,18 +144,21 @@ class ModMergerApp:
             messagebox.showerror("Error", "Mission file not loaded.")
             return
 
-        selected_mods = [mod for var, mod in self.check_vars if var.get()]
-        if not selected_mods:
-            messagebox.showwarning("Warning", "No mods selected.")
-            return
-
         try:
+            selected_mods = [mod for var, mod in self.check_vars if var.get()]
+            if not selected_mods:
+                messagebox.showwarning("Warning", "No mods selected.")
+            if not selected_mods:
+                messagebox.showwarning("Warning", "No mods selected.")
+                return
             soup = BeautifulSoup(self.mission_html, "html.parser")
-
-            # Ask user for preset name and apply to meta tag
             preset_name = simpledialog.askstring("Preset Name", "Enter a name for the merged preset:")
             if preset_name:
                 head = soup.find("head")
+                if not head:
+                    # Create a head tag if missing
+                    head = soup.new_tag("head")
+                    soup.html.insert(0, head)
                 tag = head.find("meta", attrs={"name": "arma:PresetName"})
                 if tag:
                     tag["content"] = preset_name
@@ -108,7 +166,14 @@ class ModMergerApp:
                     new_meta = soup.new_tag("meta", name="arma:PresetName", content=preset_name)
                     head.append(new_meta)
 
-            mod_table = soup.find("div", class_="mod-list").find("table")
+            mod_list_div = soup.find("div", class_="mod-list")
+            if not mod_list_div:
+                messagebox.showerror("Error", "Could not find 'mod-list' div in the mission HTML file.")
+                return
+            mod_table = mod_list_div.find("table")
+            if not mod_table:
+                messagebox.showerror("Error", "Could not find 'table' inside 'mod-list' div in the mission HTML file.")
+                return
 
             # Add selected mods to mod list
             for mod in selected_mods:
@@ -131,7 +196,9 @@ class ModMergerApp:
                 a.string = mod["link"]
                 td_link.append(a)
 
-                tr.extend([td_name, td_source, td_link])
+                tr.append(td_name)
+                tr.append(td_source)
+                tr.append(td_link)
                 mod_table.append(tr)
 
             # Use preset name for default filename and filter for HTML files
