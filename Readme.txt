@@ -8,3 +8,7 @@ Made for Australian Special Operations Taskforce (ASOT) https://www.asotmilsim.c
 ## License
 
 MIT License
+
+##
+
+To downlaod the latest release see the releases section on the right.
